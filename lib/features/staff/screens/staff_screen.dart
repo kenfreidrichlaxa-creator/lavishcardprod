@@ -3,25 +3,21 @@ import '../../../core/theme/admin_colors.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/services/cache_service.dart';
 import '../../../data/models/staff_model.dart';
-import '../../../data/services/admin_data_repository.dart';
-import '../../../shared/widgets/confirm_dialog.dart';
+import '../../../data/services/staff_repository.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/filter_bar.dart';
 import '../../../shared/widgets/offline_banner.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../../shared/widgets/status_chip.dart';
 import 'staff_profile_screen.dart';
-import '../widgets/add_staff_dialog.dart';
 
-enum _StaffFilter { all, active, inactive, stylists, managers }
+enum _StaffFilter { all, active, inactive }
 
 extension _StaffFilterLabel on _StaffFilter {
   String get label => switch (this) {
-        _StaffFilter.all => 'All',
-        _StaffFilter.active => 'Active',
+        _StaffFilter.all      => 'All',
+        _StaffFilter.active   => 'Active',
         _StaffFilter.inactive => 'Inactive',
-        _StaffFilter.stylists => 'Stylists',
-        _StaffFilter.managers => 'Managers',
       };
 }
 
@@ -52,7 +48,7 @@ class _StaffScreenState extends State<StaffScreen> {
       _offline = false;
     });
     try {
-      final s = await AdminDataRepository.instance.fetchStaff();
+      final s = await StaffRepository.instance.listStaff();
       if (!mounted) return;
       await CacheService.writeList(
         CacheKeys.staff,
@@ -87,12 +83,9 @@ class _StaffScreenState extends State<StaffScreen> {
             !s.staffId.toLowerCase().contains(q) &&
             !s.phone.contains(q)) { return false; }
         return switch (_filter) {
-          _StaffFilter.all => true,
-          _StaffFilter.active => s.status == StaffStatus.active,
+          _StaffFilter.all      => true,
+          _StaffFilter.active   => s.status == StaffStatus.active,
           _StaffFilter.inactive => s.status == StaffStatus.inactive,
-          _StaffFilter.stylists =>
-            s.position == StaffPosition.stylist || s.position == StaffPosition.seniorStylist,
-          _StaffFilter.managers => s.position == StaffPosition.manager,
         };
       }).toList();
 
@@ -110,10 +103,7 @@ class _StaffScreenState extends State<StaffScreen> {
           children: [
             PageHeader(
               title: 'Staff / Stylists',
-              subtitle: 'Manage Lavish Prima employees and service providers.',
-              actionLabel: '+ Add Staff',
-              actionIcon: Icons.person_add_rounded,
-              onAction: () => _showAddDialog(context),
+              subtitle: 'Staff is managed by Super Admin.',
             ),
 
             if (_offline)
@@ -197,17 +187,13 @@ class _StaffScreenState extends State<StaffScreen> {
         const SizedBox(width: 10),
         Text(s.fullName, style: theme.textTheme.titleSmall),
       ])),
-      DataCell(Text(s.position.label)),
+      DataCell(Text(s.positionLabel.isEmpty ? '—' : s.positionLabel)),
       DataCell(Text(s.phone, style: theme.textTheme.bodyMedium)),
       DataCell(Text('${s.serviceCount} Services', style: theme.textTheme.bodyMedium)),
       DataCell(StatusChip.staff(s.status)),
       DataCell(Text(Fmt.date(s.joinedDate), style: theme.textTheme.bodySmall)),
       DataCell(Row(children: [
         _actionBtn(Icons.visibility_outlined, 'View', () => _openProfile(context, s)),
-        _actionBtn(Icons.edit_outlined, 'Edit', () {}),
-        _actionBtn(Icons.block_rounded, 'Deactivate',
-            () => _confirmDeactivate(context, s),
-            color: AdminColors.statusSuspended),
       ])),
     ]);
   }
@@ -231,34 +217,5 @@ class _StaffScreenState extends State<StaffScreen> {
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => StaffProfileScreen(staff: s),
     ));
-  }
-
-  void _showAddDialog(BuildContext context) {
-    showDialog<void>(
-      context: context,
-      builder: (_) => AddStaffDialog(
-        onCreated: (s) {
-          setState(() => _staff.insert(0, s));
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('${s.fullName} added successfully.'),
-            backgroundColor: AdminColors.statusActive,
-          ));
-        },
-      ),
-    );
-  }
-
-  Future<void> _confirmDeactivate(BuildContext context, StaffModel s) async {
-    final confirmed = await showConfirmDialog(
-      context,
-      title: 'Deactivate Staff Account',
-      message: 'Are you sure you want to deactivate ${s.fullName}?',
-      confirmLabel: 'Deactivate',
-    );
-    if (confirmed && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${s.fullName} deactivated.'), backgroundColor: AdminColors.statusSuspended),
-      );
-    }
   }
 }

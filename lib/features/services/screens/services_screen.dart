@@ -386,6 +386,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
           name: s.name,
           category: s.category,
           price: s.price,
+          discountedPrice: s.discountedPrice,
           durationMinutes: s.durationMinutes,
           status: isActive ? ServiceStatus.inactive : ServiceStatus.active,
           description: s.description,

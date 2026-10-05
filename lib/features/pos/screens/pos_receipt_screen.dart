@@ -12,7 +12,7 @@ class ReceiptData {
     required this.transactionId,
     required this.owner,
     required this.card,
-    required this.stylist,
+    required this.stylists,
     required this.items,
     required this.total,
     required this.balanceBefore,
@@ -23,12 +23,18 @@ class ReceiptData {
   final String transactionId;
   final CardOwnerModel owner;
   final NfcCardModel card;
-  final StaffModel stylist;
+  final List<StaffModel> stylists;
   final List<CartItem> items;
   final double total;
   final double balanceBefore;
   final double balanceAfter;
   final DateTime dateTime;
+
+  /// Joined names for display.
+  String get stylistNames {
+    if (stylists.isEmpty) return '—';
+    return stylists.map((s) => s.fullName).join(', ');
+  }
 }
 
 class PosReceiptScreen extends StatelessWidget {
@@ -175,12 +181,18 @@ class PosReceiptScreen extends StatelessWidget {
                     ),
                     const Divider(height: 1, indent: 16, endIndent: 16),
 
-                    // Stylist
+                    // Stylist(s)
                     _receiptRow(context,
-                        label: 'Stylist', value: data.stylist.fullName),
-                    _receiptRow(context,
-                        label: 'Position',
-                        value: data.stylist.position.label),
+                        label: data.stylists.length > 1
+                            ? 'Stylists'
+                            : 'Stylist',
+                        value: data.stylistNames),
+                    if (data.stylists.length == 1)
+                      _receiptRow(context,
+                          label: 'Position',
+                          value: data.stylists.first.positionLabel.isEmpty
+                              ? '—'
+                              : data.stylists.first.positionLabel),
                     const Divider(height: 1, indent: 16, endIndent: 16),
 
                     // Services
@@ -225,7 +237,7 @@ class PosReceiptScreen extends StatelessWidget {
                                     style: theme
                                         .textTheme.bodySmall),
                               ),
-                            Text(Fmt.peso(item.lineTotal),
+                            Text(Fmt.peso(item.lineTotalCharged),
                                 style: theme.textTheme.titleSmall),
                           ]),
                         )),

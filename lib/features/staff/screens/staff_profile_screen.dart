@@ -66,7 +66,8 @@ class StaffProfileScreen extends StatelessWidget {
                 style: const TextStyle(
                     fontFamily: 'monospace', fontSize: 12, color: AdminColors.brownLight)),
             const SizedBox(height: 4),
-            Text(staff.position.label, style: theme.textTheme.bodyMedium),
+            Text(staff.positionLabel.isEmpty ? '—' : staff.positionLabel,
+                style: theme.textTheme.bodyMedium),
             const SizedBox(height: 8),
             StatusChip.staff(staff.status),
           ]),
@@ -79,7 +80,7 @@ class StaffProfileScreen extends StatelessWidget {
           DetailRow(label: 'Full Name', value: staff.fullName),
           DetailRow(label: 'Phone', value: staff.phone),
           DetailRow(label: 'Email', value: staff.email.isEmpty ? '—' : staff.email),
-          DetailRow(label: 'Position', value: staff.position.label),
+          DetailRow(label: 'Position', value: staff.positionLabel.isEmpty ? '—' : staff.positionLabel),
           DetailRow(label: 'Joined', value: Fmt.date(staff.joinedDate), isLast: true),
         ]),
       ),

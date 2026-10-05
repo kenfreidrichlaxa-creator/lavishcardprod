@@ -1,11 +1,13 @@
 ﻿import 'package:flutter/material.dart';
 import '../../../core/theme/admin_colors.dart';
 import '../../../core/utils/formatters.dart';
-import '../../../data/mock/mock_data.dart';
+import '../../../data/models/category_model.dart';
 import '../../../data/models/service_model.dart';
 import '../../../data/models/staff_model.dart';
 import '../../../data/services/admin_data_repository.dart';
 import '../../../data/services/card_owner_repository.dart';
+import '../../../data/services/category_repository.dart';
+import '../../../data/services/staff_repository.dart';
 import '../widgets/nfc_tap_dialog.dart';
 import '../widgets/pos_cart.dart';
 import 'pos_receipt_screen.dart';
@@ -22,24 +24,34 @@ class PosScreen extends StatefulWidget {
 
 class _PosScreenState extends State<PosScreen> {
   final PosCart _cart = PosCart();
-  ServiceCategory? _selectedCategory;
+
+  // null = show all categories
+  String? _selectedCategoryId;
   String _serviceQuery = '';
 
   List<ServiceModel> _services = [];
+  List<StaffModel> _staff = [];
+  List<PrimaryCategory> _categories = [];
   bool _loadingServices = true;
 
   @override
   void initState() {
     super.initState();
-    _loadServices();
+    _loadAll();
   }
 
-  Future<void> _loadServices() async {
+  Future<void> _loadAll() async {
     try {
-      final s = await AdminDataRepository.instance.fetchServices();
+      final results = await Future.wait([
+        AdminDataRepository.instance.fetchServices(),
+        StaffRepository.instance.listStaff(activeOnly: true),
+        CategoryRepository.instance.listPrimaryCategories(activeOnly: true),
+      ]);
       if (!mounted) return;
       setState(() {
-        _services = s;
+        _services   = results[0] as List<ServiceModel>;
+        _staff      = results[1] as List<StaffModel>;
+        _categories = results[2] as List<PrimaryCategory>;
         _loadingServices = false;
       });
     } catch (_) {
@@ -49,9 +61,21 @@ class _PosScreenState extends State<PosScreen> {
 
   List<ServiceModel> get _visibleServices {
     return _services.where((s) {
-      if (s.status != ServiceStatus.active) { return false; }
-      if (_selectedCategory != null && s.category != _selectedCategory) {
-        return false;
+      if (s.status != ServiceStatus.active) return false;
+      // Filter by dynamic primary category
+      if (_selectedCategoryId != null) {
+        if (s.primaryCategoryId != null) {
+          if (s.primaryCategoryId != _selectedCategoryId) return false;
+        } else {
+          // Fall back: match by category name
+          final cat = _categories
+              .where((c) => c.id == _selectedCategoryId)
+              .firstOrNull;
+          if (cat == null) return false;
+          if (!s.category.label
+              .toLowerCase()
+              .contains(cat.name.toLowerCase())) return false;
+        }
       }
       if (_serviceQuery.isNotEmpty &&
           !s.name.toLowerCase().contains(_serviceQuery.toLowerCase())) {
@@ -82,11 +106,12 @@ class _PosScreenState extends State<PosScreen> {
               children: [
                 Expanded(flex: 6, child: _ServicePanel(
                   cart: _cart,
-                  selectedCategory: _selectedCategory,
+                  selectedCategoryId: _selectedCategoryId,
+                  categories: _categories,
                   serviceQuery: _serviceQuery,
                   visibleServices: _visibleServices,
-                  onCategoryChanged: (c) =>
-                      setState(() => _selectedCategory = c),
+                  onCategoryChanged: (id) =>
+                      setState(() => _selectedCategoryId = id),
                   onQueryChanged: (q) =>
                       setState(() => _serviceQuery = q),
                 )),
@@ -95,6 +120,7 @@ class _PosScreenState extends State<PosScreen> {
                   width: 360,
                   child: _CartPanel(
                     cart: _cart,
+                    staff: _staff,
                     onCheckout: _handleCheckout,
                     onClear: () => setState(() => _cart.clear()),
                   ),
@@ -103,13 +129,15 @@ class _PosScreenState extends State<PosScreen> {
             )
           : _NarrowPosLayout(
               cart: _cart,
-              selectedCategory: _selectedCategory,
+              selectedCategoryId: _selectedCategoryId,
+              categories: _categories,
               serviceQuery: _serviceQuery,
               visibleServices: _visibleServices,
-              onCategoryChanged: (c) =>
-                  setState(() => _selectedCategory = c),
+              onCategoryChanged: (id) =>
+                  setState(() => _selectedCategoryId = id),
               onQueryChanged: (q) =>
                   setState(() => _serviceQuery = q),
+              staff: _staff,
               onCheckout: _handleCheckout,
               onClear: () => setState(() => _cart.clear()),
             ),
@@ -122,7 +150,7 @@ class _PosScreenState extends State<PosScreen> {
       return;
     }
     if (!_cart.hasStylist) {
-      _snack('Please select a stylist.', error: true);
+      _snack('Please select at least one stylist.', error: true);
       return;
     }
 
@@ -163,7 +191,7 @@ class _PosScreenState extends State<PosScreen> {
       cardUid: result.cardUid,
       amount: _cart.subtotal,
       serviceSummary: serviceSummary,
-      staffName: _cart.stylist!.fullName,
+      staffName: _cart.stylistNames,
     );
 
     if (!mounted) return;
@@ -189,11 +217,16 @@ class _PosScreenState extends State<PosScreen> {
     final now = DateTime.now();
     final txId = (chargeResult['wallet_tx_id'] as String?) ??
         'TXN-${now.millisecondsSinceEpoch.toString().substring(6)}';
+    // Stamp the charged unit price on each item before building the receipt
+    for (final item in _cart.items) {
+      item.setChargedPrice(item.effectivePrice(_cart.mode));
+    }
+
     final receipt = ReceiptData(
       transactionId: txId,
       owner: _cart.customer!,
       card: _cart.nfcCard!,
-      stylist: _cart.stylist!,
+      stylists: _cart.selectedStylists,
       items: List.from(_cart.items),
       total: _cart.subtotal,
       balanceBefore: balanceBefore,
@@ -203,7 +236,6 @@ class _PosScreenState extends State<PosScreen> {
 
     _cart.clear();
     setState(() {});
-
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -235,7 +267,8 @@ class _PosScreenState extends State<PosScreen> {
 class _ServicePanel extends StatelessWidget {
   const _ServicePanel({
     required this.cart,
-    required this.selectedCategory,
+    required this.selectedCategoryId,
+    required this.categories,
     required this.serviceQuery,
     required this.visibleServices,
     required this.onCategoryChanged,
@@ -243,16 +276,16 @@ class _ServicePanel extends StatelessWidget {
   });
 
   final PosCart cart;
-  final ServiceCategory? selectedCategory;
+  final String? selectedCategoryId;
+  final List<PrimaryCategory> categories;
   final String serviceQuery;
   final List<ServiceModel> visibleServices;
-  final ValueChanged<ServiceCategory?> onCategoryChanged;
+  final ValueChanged<String?> onCategoryChanged;
   final ValueChanged<String> onQueryChanged;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final categories = [null, ...ServiceCategory.values];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -278,46 +311,97 @@ class _ServicePanel extends StatelessWidget {
                 onChanged: onQueryChanged,
                 decoration: const InputDecoration(
                   hintText: 'Search services…',
-                  prefixIcon:
-                      Icon(Icons.search_rounded, size: 18),
+                  prefixIcon: Icon(Icons.search_rounded, size: 18),
                 ),
                 style: const TextStyle(fontSize: 13),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
 
-              // Category chips
+              // Regular / Discounted mode toggle
+              ListenableBuilder(
+                listenable: cart,
+                builder: (_, __) => Container(
+                  decoration: BoxDecoration(
+                    color: AdminColors.cream,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AdminColors.beigeDeep),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _ModeTab(
+                        label: 'Regular',
+                        icon: Icons.price_check_rounded,
+                        selected: cart.mode == PosMode.regular,
+                        onTap: () => cart.setMode(PosMode.regular),
+                      ),
+                      _ModeTab(
+                        label: 'Discounted',
+                        icon: Icons.local_offer_rounded,
+                        selected: cart.mode == PosMode.discounted,
+                        onTap: () => cart.setMode(PosMode.discounted),
+                        selectedColor: const Color(0xFF7B3F6E),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   spacing: 8,
-                  children: categories.map((cat) {
-                    final isSelected = selectedCategory == cat;
-                    final label = cat == null
-                        ? 'All'
-                        : cat.label;
-                    return FilterChip(
-                      label: Text(label),
-                      selected: isSelected,
-                      onSelected: (_) => onCategoryChanged(cat),
+                  children: [
+                    // "All" chip
+                    FilterChip(
+                      label: const Text('All'),
+                      selected: selectedCategoryId == null,
+                      onSelected: (_) => onCategoryChanged(null),
                       showCheckmark: false,
                       selectedColor: AdminColors.gold,
                       backgroundColor: Colors.white,
                       side: BorderSide(
-                          color: isSelected
+                          color: selectedCategoryId == null
                               ? AdminColors.gold
                               : AdminColors.beigeDeep),
                       labelStyle: TextStyle(
-                          color: isSelected
+                          color: selectedCategoryId == null
                               ? Colors.white
                               : AdminColors.brownMedium,
                           fontSize: 12,
-                          fontWeight: isSelected
+                          fontWeight: selectedCategoryId == null
                               ? FontWeight.w600
                               : FontWeight.w400),
                       padding: const EdgeInsets.symmetric(
                           horizontal: 4, vertical: 2),
-                    );
-                  }).toList(),
+                    ),
+                    // Dynamic primary category chips
+                    ...categories.map((cat) {
+                      final isSelected = selectedCategoryId == cat.id;
+                      return FilterChip(
+                        label: Text(cat.name),
+                        selected: isSelected,
+                        onSelected: (_) => onCategoryChanged(
+                            isSelected ? null : cat.id),
+                        showCheckmark: false,
+                        selectedColor: AdminColors.gold,
+                        backgroundColor: Colors.white,
+                        side: BorderSide(
+                            color: isSelected
+                                ? AdminColors.gold
+                                : AdminColors.beigeDeep),
+                        labelStyle: TextStyle(
+                            color: isSelected
+                                ? Colors.white
+                                : AdminColors.brownMedium,
+                            fontSize: 12,
+                            fontWeight: isSelected
+                                ? FontWeight.w600
+                                : FontWeight.w400),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 2),
+                      );
+                    }),
+                  ],
                 ),
               ),
             ],
@@ -358,6 +442,7 @@ class _ServicePanel extends StatelessWidget {
                       return _ServiceCard(
                         service: svc,
                         inCart: inCart,
+                        mode: cart.mode,
                         onTap: () => inCart
                             ? cart.removeService(svc)
                             : cart.addService(svc),
@@ -375,20 +460,25 @@ class _ServiceCard extends StatelessWidget {
   const _ServiceCard({
     required this.service,
     required this.inCart,
+    required this.mode,
     required this.onTap,
   });
 
   final ServiceModel service;
   final bool inCart;
+  final PosMode mode;
   final VoidCallback onTap;
 
-  Color get _catColor => switch (service.category) {
-        ServiceCategory.hair => const Color(0xFF8B6835),
-        ServiceCategory.nails => const Color(0xFF7B3F6E),
-        ServiceCategory.skin => const Color(0xFF2E6B8A),
-        ServiceCategory.beauty => const Color(0xFF4A7C59),
-        ServiceCategory.other => AdminColors.brownMedium,
-      };
+  Color get _catColor {
+    // Use a consistent color based on the first letter of the category name
+    final name = (service.primaryCategoryName ?? service.category.label).toLowerCase();
+    if (name.contains('nail')) return const Color(0xFF7B3F6E);
+    if (name.contains('hair')) return const Color(0xFF8B6835);
+    if (name.contains('skin') || name.contains('facial')) return const Color(0xFF2E6B8A);
+    if (name.contains('massage') || name.contains('beauty')) return const Color(0xFF4A7C59);
+    if (name.contains('combo') || name.contains('promo')) return const Color(0xFF6B4C9A);
+    return AdminColors.brownMedium;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -430,7 +520,7 @@ class _ServiceCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
-                    service.category.label,
+                    service.categoryLabel,
                     style: TextStyle(
                         fontSize: 9,
                         fontWeight: FontWeight.w700,
@@ -463,17 +553,34 @@ class _ServiceCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Row(children: [
-              Text(
-                Fmt.peso(service.price),
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: inCart
-                      ? Colors.white
-                      : AdminColors.gold,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      Fmt.peso(service.effectivePrice(
+                          useDiscount: mode == PosMode.discounted)),
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: inCart ? Colors.white : AdminColors.gold,
+                      ),
+                    ),
+                    // Show original price as strikethrough if in discounted mode
+                    if (mode == PosMode.discounted && service.hasDiscount)
+                      Text(
+                        Fmt.peso(service.price),
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: inCart
+                              ? Colors.white.withValues(alpha: 0.7)
+                              : AdminColors.brownLight,
+                          decoration: TextDecoration.lineThrough,
+                        ),
+                      ),
+                  ],
                 ),
               ),
-              const Spacer(),
               Text(
                 service.durationLabel,
                 style: TextStyle(
@@ -496,11 +603,13 @@ class _ServiceCard extends StatelessWidget {
 class _CartPanel extends StatelessWidget {
   const _CartPanel({
     required this.cart,
+    required this.staff,
     required this.onCheckout,
     required this.onClear,
   });
 
   final PosCart cart;
+  final List<StaffModel> staff;
   final VoidCallback onCheckout;
   final VoidCallback onClear;
 
@@ -542,7 +651,7 @@ class _CartPanel extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // ── Stylist picker ────────────────────────────────
-                    _StylistPicker(cart: cart),
+                    _StylistPicker(cart: cart, staff: staff),
                     const SizedBox(height: 16),
 
                     // ── Customer from NFC ─────────────────────────────
@@ -615,7 +724,7 @@ class _CartPanel extends StatelessWidget {
                     Text(
                       !cart.hasItems
                           ? 'Add services to continue'
-                          : 'Select a stylist to continue',
+                          : 'Select at least one stylist',
                       style: theme.textTheme.bodySmall,
                       textAlign: TextAlign.center,
                     ),
@@ -630,87 +739,185 @@ class _CartPanel extends StatelessWidget {
   }
 }
 
-// ── Stylist Picker ────────────────────────────────────────────────────────────
+// ── Multi-Stylist Picker ──────────────────────────────────────────────────────
 
 class _StylistPicker extends StatelessWidget {
-  const _StylistPicker({required this.cart});
+  const _StylistPicker({required this.cart, required this.staff});
   final PosCart cart;
+  final List<StaffModel> staff;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final stylists = AdminMockData.staff
-        .where((s) =>
-            s.status == StaffStatus.active &&
-            (s.position == StaffPosition.stylist ||
-                s.position == StaffPosition.seniorStylist))
-        .toList();
 
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('Stylist *',
-          style: theme.textTheme.labelMedium?.copyWith(
-              color: AdminColors.brownLight, letterSpacing: 0.5)),
-      const SizedBox(height: 8),
-      DropdownButtonFormField<StaffModel>(
-        initialValue: cart.stylist,
-        decoration: InputDecoration(
-          prefixIcon: const Icon(Icons.badge_outlined, size: 18),
-          hintText: 'Select stylist',
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          filled: true,
-          fillColor: Colors.white,
-          border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide:
-                  const BorderSide(color: AdminColors.beigeDeep)),
-          enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide:
-                  const BorderSide(color: AdminColors.beigeDeep)),
-          focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(
-                  color: AdminColors.gold, width: 1.5)),
-        ),
-        items: stylists
-            .map((s) => DropdownMenuItem(
-                  value: s,
-                  child: Row(children: [
-                    CircleAvatar(
-                      radius: 12,
-                      backgroundColor: AdminColors.cream,
-                      child: Text(s.initials,
-                          style: const TextStyle(
-                              fontSize: 8,
-                              fontWeight: FontWeight.w700,
-                              color: AdminColors.gold)),
+    return ListenableBuilder(
+      listenable: cart,
+      builder: (_, __) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Header row: label + count stepper ──────────────────────
+            Row(children: [
+              Text('Stylist(s) *',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                      color: AdminColors.brownLight, letterSpacing: 0.5)),
+              const Spacer(),
+              // Stepper
+              Container(
+                decoration: BoxDecoration(
+                  color: AdminColors.cream,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AdminColors.beigeDeep),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  _StepBtn(
+                    icon: Icons.remove_rounded,
+                    onTap: cart.stylistCount > 1
+                        ? () => cart.setStylistCount(cart.stylistCount - 1)
+                        : null,
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text(
+                      '${cart.stylistCount}',
+                      style: theme.textTheme.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w700),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        '${s.fullName}  ·  ${s.position.label}',
-                        style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: AdminColors.charcoal),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                  ),
+                  _StepBtn(
+                    icon: Icons.add_rounded,
+                    onTap: cart.stylistCount < 5
+                        ? () => cart.setStylistCount(cart.stylistCount + 1)
+                        : null,
+                  ),
+                ]),
+              ),
+            ]),
+            const SizedBox(height: 8),
+
+            // ── One dropdown per slot ───────────────────────────────────
+            if (staff.isEmpty)
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AdminColors.cream,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AdminColors.beigeDeep),
+                ),
+                child: const Row(children: [
+                  Icon(Icons.badge_outlined,
+                      size: 16, color: AdminColors.brownLight),
+                  SizedBox(width: 8),
+                  Text('No stylists available',
+                      style: TextStyle(
+                          fontSize: 12, color: AdminColors.brownLight)),
+                ]),
+              )
+            else
+              ...List.generate(cart.stylistCount, (i) {
+                return Padding(
+                  padding: EdgeInsets.only(
+                      bottom: i < cart.stylistCount - 1 ? 8 : 0),
+                  child: DropdownButtonFormField<StaffModel?>(
+                    value: staff.any((s) => s.id == cart.stylists[i]?.id)
+                        ? cart.stylists[i]
+                        : null,
+                    decoration: InputDecoration(
+                      prefixIcon:
+                          const Icon(Icons.badge_outlined, size: 18),
+                      hintText: 'Stylist ${i + 1}',
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(
+                              color: AdminColors.beigeDeep)),
+                      enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(
+                              color: AdminColors.beigeDeep)),
+                      focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(
+                              color: AdminColors.gold, width: 1.5)),
+                    ),
+                    items: [
+                      const DropdownMenuItem<StaffModel?>(
+                        value: null,
+                        child: Text('— None —',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: AdminColors.brownMedium)),
                       ),
-                    ),
-                  ]),
-                ))
-            .toList(),
-        onChanged: (s) {
-          if (s != null) cart.setStylist(s);
-        },
-        style: const TextStyle(
-            fontSize: 13, color: AdminColors.charcoal),
-        dropdownColor: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        isExpanded: true,
+                      ...staff.map((s) => DropdownMenuItem<StaffModel?>(
+                            value: s,
+                            child: Row(children: [
+                              CircleAvatar(
+                                radius: 12,
+                                backgroundColor: AdminColors.cream,
+                                child: Text(s.initials,
+                                    style: const TextStyle(
+                                        fontSize: 8,
+                                        fontWeight: FontWeight.w700,
+                                        color: AdminColors.gold)),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  s.positionLabel.isEmpty
+                                      ? s.fullName
+                                      : '${s.fullName}  ·  ${s.positionLabel}',
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                      color: AdminColors.charcoal),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ]),
+                          )),
+                    ],
+                    onChanged: (s) => cart.setStylistAt(i, s),
+                    style: const TextStyle(
+                        fontSize: 13, color: AdminColors.charcoal),
+                    dropdownColor: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    isExpanded: true,
+                  ),
+                );
+              }),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _StepBtn extends StatelessWidget {
+  const _StepBtn({required this.icon, required this.onTap});
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(7),
+        ),
+        child: Icon(icon,
+            size: 16,
+            color: onTap != null
+                ? AdminColors.brownMedium
+                : AdminColors.beigeDeep),
       ),
-    ]);
+    );
   }
 }
 
@@ -805,6 +1012,10 @@ class _CartItemTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final unitPrice = item.effectivePrice(cart.mode);
+    final total = item.lineTotal(cart.mode);
+    final isDiscounted =
+        cart.mode == PosMode.discounted && item.service.hasDiscount;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -829,9 +1040,19 @@ class _CartItemTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(item.service.name, style: theme.textTheme.titleSmall),
-              Text(Fmt.peso(item.service.price),
-                  style: const TextStyle(
-                      fontSize: 11, color: AdminColors.brownLight)),
+              Row(children: [
+                Text(Fmt.peso(unitPrice),
+                    style: const TextStyle(
+                        fontSize: 11, color: AdminColors.brownLight)),
+                if (isDiscounted) ...[
+                  const SizedBox(width: 4),
+                  Text(Fmt.peso(item.service.price),
+                      style: const TextStyle(
+                          fontSize: 10,
+                          color: AdminColors.brownLight,
+                          decoration: TextDecoration.lineThrough)),
+                ],
+              ]),
             ],
           ),
         ),
@@ -855,7 +1076,7 @@ class _CartItemTile extends StatelessWidget {
         ]),
 
         const SizedBox(width: 10),
-        Text(Fmt.peso(item.lineTotal),
+        Text(Fmt.peso(total),
             style: theme.textTheme.titleSmall
                 ?.copyWith(color: AdminColors.gold)),
       ]),
@@ -921,21 +1142,25 @@ class _EmptyCartPlaceholder extends StatelessWidget {
 class _NarrowPosLayout extends StatefulWidget {
   const _NarrowPosLayout({
     required this.cart,
-    required this.selectedCategory,
+    required this.selectedCategoryId,
+    required this.categories,
     required this.serviceQuery,
     required this.visibleServices,
     required this.onCategoryChanged,
     required this.onQueryChanged,
+    required this.staff,
     required this.onCheckout,
     required this.onClear,
   });
 
   final PosCart cart;
-  final ServiceCategory? selectedCategory;
+  final String? selectedCategoryId;
+  final List<PrimaryCategory> categories;
   final String serviceQuery;
   final List<ServiceModel> visibleServices;
-  final ValueChanged<ServiceCategory?> onCategoryChanged;
+  final ValueChanged<String?> onCategoryChanged;
   final ValueChanged<String> onQueryChanged;
+  final List<StaffModel> staff;
   final VoidCallback onCheckout;
   final VoidCallback onClear;
 
@@ -1004,7 +1229,8 @@ class _NarrowPosLayoutState extends State<_NarrowPosLayout>
           children: [
             _ServicePanel(
               cart: widget.cart,
-              selectedCategory: widget.selectedCategory,
+              selectedCategoryId: widget.selectedCategoryId,
+              categories: widget.categories,
               serviceQuery: widget.serviceQuery,
               visibleServices: widget.visibleServices,
               onCategoryChanged: widget.onCategoryChanged,
@@ -1012,6 +1238,7 @@ class _NarrowPosLayoutState extends State<_NarrowPosLayout>
             ),
             _CartPanel(
               cart: widget.cart,
+              staff: widget.staff,
               onCheckout: widget.onCheckout,
               onClear: widget.onClear,
             ),
@@ -1041,15 +1268,46 @@ class _CheckoutConfirmDialog extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Summary rows
-          _ConfirmRow('Customer',
-              cart.customer?.fullName ?? '—'),
-          _ConfirmRow('Card',
-              cart.nfcCard?.cardId ?? '—', mono: true),
-          _ConfirmRow('Stylist',
-              cart.stylist?.fullName ?? '—'),
-          _ConfirmRow(
-              'Services', '${cart.totalItems} service(s)'),
+          // Mode badge
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: cart.mode == PosMode.discounted
+                  ? const Color(0xFF7B3F6E).withValues(alpha: 0.12)
+                  : AdminColors.cream,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(
+                cart.mode == PosMode.discounted
+                    ? Icons.local_offer_rounded
+                    : Icons.price_check_rounded,
+                size: 12,
+                color: cart.mode == PosMode.discounted
+                    ? const Color(0xFF7B3F6E)
+                    : AdminColors.brownMedium,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                cart.mode == PosMode.discounted
+                    ? 'Discounted Price'
+                    : 'Regular Price',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: cart.mode == PosMode.discounted
+                      ? const Color(0xFF7B3F6E)
+                      : AdminColors.brownMedium,
+                ),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 12),
+          _ConfirmRow('Customer', cart.customer?.fullName ?? '—'),
+          _ConfirmRow('Card', cart.nfcCard?.cardId ?? '—', mono: true),
+          _ConfirmRow('Stylist', cart.stylistNames),
+          _ConfirmRow('Services', '${cart.totalItems} service(s)'),
           const Divider(height: 20),
           _ConfirmRow('Total', Fmt.peso(cart.subtotal),
               bold: true, valueColor: AdminColors.gold),
@@ -1116,7 +1374,58 @@ class _ConfirmRow extends StatelessWidget {
   }
 }
 
-// ── Processing dialog ─────────────────────────────────────────────────────────
+// ── Mode Tab (Regular / Discounted) ──────────────────────────────────────────
+
+class _ModeTab extends StatelessWidget {
+  const _ModeTab({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+    this.selectedColor = AdminColors.gold,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+  final Color selectedColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? selectedColor : Colors.transparent,
+          borderRadius: BorderRadius.circular(7),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon,
+                size: 14,
+                color: selected ? Colors.white : AdminColors.brownMedium),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight:
+                    selected ? FontWeight.w700 : FontWeight.w400,
+                color:
+                    selected ? Colors.white : AdminColors.brownMedium,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _ProcessingDialog extends StatelessWidget {
   const _ProcessingDialog();

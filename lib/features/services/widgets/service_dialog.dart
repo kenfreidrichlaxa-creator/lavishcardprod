@@ -18,6 +18,7 @@ class _ServiceDialogState extends State<ServiceDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameCtrl;
   late final TextEditingController _priceCtrl;
+  late final TextEditingController _discountedPriceCtrl;
   late final TextEditingController _durationCtrl;
   late final TextEditingController _descCtrl;
 
@@ -48,6 +49,10 @@ class _ServiceDialogState extends State<ServiceDialog> {
     _nameCtrl = TextEditingController(text: e?.name ?? '');
     _priceCtrl =
         TextEditingController(text: e != null ? e.price.toStringAsFixed(2) : '');
+    _discountedPriceCtrl = TextEditingController(
+        text: e?.discountedPrice != null
+            ? e!.discountedPrice!.toStringAsFixed(2)
+            : '');
     _durationCtrl =
         TextEditingController(text: e?.durationMinutes.toString() ?? '');
     _descCtrl = TextEditingController(text: e?.description ?? '');
@@ -79,6 +84,7 @@ class _ServiceDialogState extends State<ServiceDialog> {
   void dispose() {
     _nameCtrl.dispose();
     _priceCtrl.dispose();
+    _discountedPriceCtrl.dispose();
     _durationCtrl.dispose();
     _descCtrl.dispose();
     super.dispose();
@@ -242,7 +248,7 @@ class _ServiceDialogState extends State<ServiceDialog> {
                         keyboardType: const TextInputType.numberWithOptions(
                             decimal: true),
                         decoration: const InputDecoration(
-                          labelText: 'Price (₱)',
+                          labelText: 'Regular Price (₱)',
                           prefixIcon: Icon(Icons.payments_outlined),
                         ),
                         style: const TextStyle(fontSize: 13),
@@ -271,6 +277,28 @@ class _ServiceDialogState extends State<ServiceDialog> {
                       ),
                     ),
                   ]),
+                  const SizedBox(height: 12),
+
+                  // ── Discounted Price ─────────────────────────────────────
+                  TextFormField(
+                    controller: _discountedPriceCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true),
+                    decoration: InputDecoration(
+                      labelText: 'Discounted Price (₱)  —  optional',
+                      prefixIcon: const Icon(Icons.local_offer_rounded),
+                      helperText: 'Leave blank if no promo price.',
+                      helperStyle: const TextStyle(fontSize: 11),
+                      filled: true,
+                      fillColor: AdminColors.cream.withValues(alpha: 0.5),
+                    ),
+                    style: const TextStyle(fontSize: 13),
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) return null;
+                      if (double.tryParse(v.trim()) == null) return 'Invalid number';
+                      return null;
+                    },
+                  ),
                   const SizedBox(height: 12),
 
                   // ── Description ──────────────────────────────────────────
@@ -369,10 +397,15 @@ class _ServiceDialogState extends State<ServiceDialog> {
         .firstOrNull;
 
     try {
+      final discountedPriceRaw = _discountedPriceCtrl.text.trim();
+      final discountedPrice = discountedPriceRaw.isEmpty
+          ? null
+          : double.tryParse(discountedPriceRaw);
+
       final savedId = await AdminDataRepository.instance.saveService(
         id: e?.id,
         name: _nameCtrl.text.trim(),
-        category: _hasDynamicCategories ? _legacyCategory : _legacyCategory,
+        category: _legacyCategory,
         price: double.parse(_priceCtrl.text.trim()),
         durationMinutes: int.parse(_durationCtrl.text.trim()),
         status: _status,
@@ -380,17 +413,16 @@ class _ServiceDialogState extends State<ServiceDialog> {
             _descCtrl.text.trim().isEmpty ? null : _descCtrl.text.trim(),
         primaryCategoryId: _selectedPrimaryId,
         promoCategoryId: _selectedPromoId,
+        discountedPrice: discountedPrice,
       );
 
       final saved = ServiceModel(
         id: savedId,
-        // Temporary placeholder code — will be properly sequenced on next
-        // full load via ServiceCodeGenerator.assign(). Shows category prefix
-        // so it's readable immediately after saving.
         serviceId: _buildTempCode(),
         name: _nameCtrl.text.trim(),
         category: _legacyCategory,
         price: double.parse(_priceCtrl.text.trim()),
+        discountedPrice: discountedPrice,
         durationMinutes: int.parse(_durationCtrl.text.trim()),
         status: _status,
         description:

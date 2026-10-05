@@ -1,23 +1,26 @@
 enum StaffStatus { active, inactive }
 
-enum StaffPosition {
-  stylist,
-  seniorStylist,
-  manager,
-  cashier,
-  receptionist,
-  administrator,
-}
+/// Dynamic staff position from `staff_positions` table.
+class StaffPositionModel {
+  const StaffPositionModel({
+    required this.id,
+    required this.name,
+    required this.sortOrder,
+    required this.isActive,
+  });
 
-extension StaffPositionLabel on StaffPosition {
-  String get label => switch (this) {
-        StaffPosition.stylist => 'Stylist',
-        StaffPosition.seniorStylist => 'Senior Stylist',
-        StaffPosition.manager => 'Manager',
-        StaffPosition.cashier => 'Cashier',
-        StaffPosition.receptionist => 'Receptionist',
-        StaffPosition.administrator => 'Administrator',
-      };
+  final String id;
+  final String name;
+  final int sortOrder;
+  final bool isActive;
+
+  factory StaffPositionModel.fromRow(Map<String, dynamic> r) =>
+      StaffPositionModel(
+        id: (r['id'] as String?) ?? '',
+        name: (r['name'] as String?) ?? '',
+        sortOrder: (r['sort_order'] as int?) ?? 0,
+        isActive: (r['is_active'] as bool?) ?? true,
+      );
 }
 
 class StaffModel {
@@ -27,9 +30,10 @@ class StaffModel {
     required this.fullName,
     required this.phone,
     required this.email,
-    required this.position,
+    required this.positionLabel,
     required this.status,
     required this.joinedDate,
+    this.positionId,
     this.serviceCount = 0,
     this.services = const [],
   });
@@ -39,7 +43,14 @@ class StaffModel {
   final String fullName;
   final String phone;
   final String email;
-  final StaffPosition position;
+
+  /// The display label for this staff's position (e.g. "Stylist", "Senior Stylist").
+  /// Comes from position_name column (denormalized) or falls back to position column.
+  final String positionLabel;
+
+  /// FK to staff_positions table — null for legacy staff with no dynamic position.
+  final String? positionId;
+
   final StaffStatus status;
   final DateTime joinedDate;
   final int serviceCount;
@@ -61,7 +72,8 @@ extension StaffModelJson on StaffModel {
         'fullName': fullName,
         'phone': phone,
         'email': email,
-        'position': position.name,
+        'positionLabel': positionLabel,
+        'positionId': positionId,
         'status': status.name,
         'joinedDate': joinedDate.toIso8601String(),
         'serviceCount': serviceCount,
@@ -74,10 +86,8 @@ extension StaffModelJson on StaffModel {
         fullName: j['fullName'] as String,
         phone: j['phone'] as String,
         email: j['email'] as String,
-        position: StaffPosition.values.firstWhere(
-          (e) => e.name == j['position'],
-          orElse: () => StaffPosition.stylist,
-        ),
+        positionLabel: (j['positionLabel'] as String?) ?? '',
+        positionId: j['positionId'] as String?,
         status: StaffStatus.values.firstWhere(
           (e) => e.name == j['status'],
           orElse: () => StaffStatus.active,

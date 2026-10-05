@@ -58,7 +58,7 @@ abstract final class AdminMockData {
     StaffModel(
       id: 'st1', staffId: 'STF-001', fullName: 'Maria Santos',
       phone: '09171234567', email: 'maria.santos@lavishprima.com',
-      position: StaffPosition.seniorStylist, status: StaffStatus.active,
+      positionLabel: 'Senior Stylist', status: StaffStatus.active,
       joinedDate: DateTime(2024, 3, 10),
       serviceCount: 12,
       services: ['Haircut', 'Hair Color', 'Hair Treatment', 'Hair Styling'],
@@ -66,7 +66,7 @@ abstract final class AdminMockData {
     StaffModel(
       id: 'st2', staffId: 'STF-002', fullName: 'Carlo Reyes',
       phone: '09182345678', email: 'carlo.reyes@lavishprima.com',
-      position: StaffPosition.stylist, status: StaffStatus.active,
+      positionLabel: 'Stylist', status: StaffStatus.active,
       joinedDate: DateTime(2024, 6, 15),
       serviceCount: 8,
       services: ['Haircut', 'Hair Styling'],
@@ -74,7 +74,7 @@ abstract final class AdminMockData {
     StaffModel(
       id: 'st3', staffId: 'STF-003', fullName: 'Angela Cruz',
       phone: '09193456789', email: 'angela.cruz@lavishprima.com',
-      position: StaffPosition.stylist, status: StaffStatus.active,
+      positionLabel: 'Stylist', status: StaffStatus.active,
       joinedDate: DateTime(2025, 1, 5),
       serviceCount: 10,
       services: ['Manicure', 'Pedicure', 'Eyebrow Threading'],
@@ -82,7 +82,7 @@ abstract final class AdminMockData {
     StaffModel(
       id: 'st4', staffId: 'STF-004', fullName: 'Reyna Lim',
       phone: '09204567890', email: 'reyna.lim@lavishprima.com',
-      position: StaffPosition.seniorStylist, status: StaffStatus.active,
+      positionLabel: 'Senior Stylist', status: StaffStatus.active,
       joinedDate: DateTime(2023, 11, 20),
       serviceCount: 15,
       services: ['Facial', 'Full Body Massage', 'Hair Treatment'],
@@ -90,7 +90,7 @@ abstract final class AdminMockData {
     StaffModel(
       id: 'st5', staffId: 'STF-005', fullName: 'Dan Flores',
       phone: '09215678901', email: 'dan.flores@lavishprima.com',
-      position: StaffPosition.manager, status: StaffStatus.active,
+      positionLabel: 'Manager', status: StaffStatus.active,
       joinedDate: DateTime(2023, 8, 1),
       serviceCount: 5,
       services: [],

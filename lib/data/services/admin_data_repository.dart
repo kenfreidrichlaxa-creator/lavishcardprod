@@ -6,6 +6,7 @@ import '../../core/services/supabase_service.dart';
 import '../models/service_model.dart';
 import '../models/staff_model.dart';
 import '../models/transaction_model.dart';
+import 'staff_repository.dart';
 
 /// Dashboard-level aggregate stats pulled from Supabase.
 class DashboardStats {
@@ -325,7 +326,7 @@ class AdminDataRepository {
     final rows = await _db
         .from('services')
         .select(
-            'id, name, category_name, price, duration_minutes, status, description, primary_category_id, primary_category_name, promo_category_id, promo_category_name')
+            'id, name, category_name, price, discounted_price, duration_minutes, status, description, primary_category_id, primary_category_name, promo_category_id, promo_category_name')
         .order('name', ascending: true);
     final services = (rows as List)
         .map((r) => _serviceFromRow(Map<String, dynamic>.from(r)))
@@ -333,7 +334,6 @@ class AdminDataRepository {
     // Assign category-prefixed codes (H001, N002, etc.) after loading.
     return ServiceCodeGenerator.assign(services);
   }
-
   /// Creates or updates a universal service via upsert_service.
   /// Returns the saved service id on success, or throws with a message.
   Future<String> saveService({
@@ -346,6 +346,7 @@ class AdminDataRepository {
     String? description,
     String? primaryCategoryId,
     String? promoCategoryId,
+    double? discountedPrice,
     String performedBy = 'admin',
   }) async {
     final res = await _db.rpc('upsert_service', params: {
@@ -359,6 +360,7 @@ class AdminDataRepository {
       'p_primary_category_id': primaryCategoryId,
       'p_promo_category_id': promoCategoryId,
       'p_performed_by': performedBy,
+      'p_discounted_price': discountedPrice,
     });
     final map = Map<String, dynamic>.from(res as Map);
     if (map['success'] == true) return (map['id'] as String);
@@ -398,6 +400,7 @@ class AdminDataRepository {
       name: (r['name'] as String?) ?? '',
       category: _mapCategory(r['category_name'] as String?),
       price: (r['price'] as num?)?.toDouble() ?? 0,
+      discountedPrice: (r['discounted_price'] as num?)?.toDouble(),
       durationMinutes: (r['duration_minutes'] as num?)?.toInt() ?? 0,
       status: (r['status'] as String?) == 'active'
           ? ServiceStatus.active
@@ -538,36 +541,15 @@ class AdminDataRepository {
     return map.values.toList();
   }
 
-  /// Derives a StaffModel list from distinct staff names + their service counts.
+  /// Fetches staff from the centralized `staff` table managed by Super Admin.
   Future<List<StaffModel>> fetchStaff() async {
-    final leaders = await fetchStaffLeaderboard();
-    final byName = {for (final l in leaders) l.name: l};
-
-    // Include any staff names that appear but had no completed payment.
-    final allNames = await _distinctStaffNames();
-    final names = <String>{...byName.keys, ...allNames}.toList()..sort();
-
-    var i = 0;
-    return names.map((name) {
-      i++;
-      final count = byName[name]?.totalServices ?? 0;
-      return StaffModel(
-        id: 'staff_$i',
-        staffId: 'STF-${i.toString().padLeft(3, '0')}',
-        fullName: name,
-        phone: '—',
-        email: '—',
-        position: StaffPosition.stylist,
-        status: StaffStatus.active,
-        joinedDate: DateTime.now(),
-        serviceCount: count,
-        services: const [],
-      );
-    }).toList();
+    return StaffRepository.instance.listStaff();
   }
 
-  /// Staff names for the POS stylist picker.
-  Future<List<String>> fetchStylistNames() => _distinctStaffNames();
+  /// Staff names for the POS stylist picker (active only).
+  Future<List<StaffModel>> fetchActiveStylists() async {
+    return StaffRepository.instance.listStaff(activeOnly: true);
+  }
 
   // ── Enum / helper mappers ─────────────────────────────────────────────────
   static PaymentMethod _mapPayment(String dbType) {

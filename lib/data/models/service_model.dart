@@ -35,41 +35,36 @@ class ServiceModel {
     this.primaryCategoryName,
     this.promoCategoryId,
     this.promoCategoryName,
+    this.discountedPrice,
   });
 
   final String id;
-
-  /// Auto-generated display code: prefix letter + 3-digit sequence.
-  /// e.g. "N001" for the first Nails service, "H003" for the 3rd Hair service.
-  /// Assigned by [ServiceCodeGenerator.assign] after loading from the DB.
   final String serviceId;
-
   final String name;
-
-  /// Legacy flat category (kept for backward compat with existing code).
   final ServiceCategory category;
-
   final double price;
+
+  /// Optional discounted price. Null means no promo price set.
+  final double? discountedPrice;
+
   final int durationMinutes;
   final ServiceStatus status;
   final String? description;
-
-  /// Dynamic primary category from `service_primary_categories` table.
-  /// Null means the service hasn't been assigned to a dynamic category yet.
   final String? primaryCategoryId;
   final String? primaryCategoryName;
-
-  /// Optional promo/secondary category from `service_promo_categories` table.
   final String? promoCategoryId;
   final String? promoCategoryName;
 
   String get durationLabel => '$durationMinutes min';
-
-  /// Display label: prefer dynamic primary category name, fall back to legacy enum.
   String get categoryLabel => primaryCategoryName ?? category.label;
 
-  /// The prefix letter for the code — from dynamic primary category name if
-  /// available, otherwise from the legacy category enum.
+  /// True if this service has a discounted price set.
+  bool get hasDiscount => discountedPrice != null && discountedPrice! > 0;
+
+  /// Returns discounted price if available, otherwise regular price.
+  double effectivePrice({bool useDiscount = false}) =>
+      useDiscount && hasDiscount ? discountedPrice! : price;
+
   String get _codePrefix {
     final dynamic = primaryCategoryName;
     if (dynamic != null && dynamic.isNotEmpty) {
@@ -120,6 +115,7 @@ abstract final class ServiceCodeGenerator {
           name: s.name,
           category: s.category,
           price: s.price,
+          discountedPrice: s.discountedPrice,
           durationMinutes: s.durationMinutes,
           status: s.status,
           description: s.description,
@@ -144,6 +140,7 @@ extension ServiceModelJson on ServiceModel {
         'name': name,
         'category': category.name,
         'price': price,
+        'discountedPrice': discountedPrice,
         'durationMinutes': durationMinutes,
         'status': status.name,
         'description': description,
@@ -162,6 +159,9 @@ extension ServiceModelJson on ServiceModel {
           orElse: () => ServiceCategory.other,
         ),
         price: (j['price'] as num).toDouble(),
+        discountedPrice: j['discountedPrice'] == null
+            ? null
+            : (j['discountedPrice'] as num).toDouble(),
         durationMinutes: (j['durationMinutes'] as num).toInt(),
         status: ServiceStatus.values.firstWhere(
           (e) => e.name == j['status'],

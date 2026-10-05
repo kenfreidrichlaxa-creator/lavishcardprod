@@ -9,6 +9,7 @@ import '../features/super_admin/screens/cards_hub_screen.dart';
 import '../features/super_admin/screens/admin_maker_screen.dart';
 import '../features/super_admin/screens/audit_viewer_screen.dart';
 import '../features/super_admin/screens/category_manager_screen.dart';
+import '../features/super_admin/screens/staff_manager_screen.dart';
 import '../features/services/screens/services_screen.dart';
 import '../features/settings/screens/settings_screen.dart';
 
@@ -30,6 +31,7 @@ class _SuperAdminShellState extends State<SuperAdminShell> {
     _Nav(Icons.credit_card_rounded, 'Cards'),
     _Nav(Icons.content_cut_rounded, 'Services'),
     _Nav(Icons.category_rounded, 'Categories'),
+    _Nav(Icons.badge_rounded, 'Staff'),
     _Nav(Icons.admin_panel_settings_rounded, 'Admin Accounts'),
     _Nav(Icons.history_rounded, 'Audit Trail'),
     _Nav(Icons.settings_rounded, 'Settings'),
@@ -42,6 +44,7 @@ class _SuperAdminShellState extends State<SuperAdminShell> {
     CardsHubScreen(),
     ServicesScreen(),
     CategoryManagerScreen(),
+    StaffManagerScreen(),
     AdminMakerScreen(),
     AuditViewerScreen(),
     SettingsScreen(),

@@ -25,7 +25,7 @@ class _ManagerStaffScreenState extends State<ManagerStaffScreen> {
       final q = _query.toLowerCase();
       return s.fullName.toLowerCase().contains(q) ||
           s.staffId.toLowerCase().contains(q) ||
-          s.position.label.toLowerCase().contains(q);
+          s.positionLabel.toLowerCase().contains(q);
     }).toList();
 
     return Scaffold(
@@ -93,7 +93,7 @@ class _ManagerStaffScreenState extends State<ManagerStaffScreen> {
                                   Text(s.fullName,
                                       style: theme.textTheme.titleSmall),
                                 ])),
-                                DataCell(Text(s.position.label)),
+                                DataCell(Text(s.positionLabel)),
                                 DataCell(Text(s.phone,
                                     style: theme.textTheme.bodyMedium)),
                                 DataCell(Text('${s.serviceCount} services')),
